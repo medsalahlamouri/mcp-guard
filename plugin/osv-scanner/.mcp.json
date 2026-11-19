@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "osv": {
+      "command": "${MCPGUARD_PYTHON}",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/serveur_osv.py"]
+    }
+  }
+}

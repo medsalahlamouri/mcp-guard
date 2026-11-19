@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+data/*.db
+data/outbox/
+uploads/*
+!uploads/.gitkeep
+# Secrets Google Drive (OAuth) : ne jamais partager ni archiver
+credentials.json
+token.json
+*.pyc
+.pytest_cache/
+# Réglages locaux de Claude Code et ancienne version de l'interface (non livrées)
+.claude/settings.local.json
+frontend/index.ancien.html
