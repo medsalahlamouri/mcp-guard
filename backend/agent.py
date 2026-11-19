@@ -11,6 +11,8 @@ import os
 import smtplib
 import ssl
 import sys
+from collections.abc import Generator
+from contextlib import contextmanager
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
@@ -61,7 +63,8 @@ def instructions_agent() -> str:
     """System prompt + préférences de l'utilisateur lues dans la mémoire à long terme (à chaque appel)."""
     niveau = registry.lire_preferences()["niveau_detail"]
     return (f"{INSTRUCTIONS}\n\n## Préférences de l'utilisateur (mémoire à long terme)\n"
-            f"- Niveau de détail des rapports : **{niveau}** — {CONSIGNES_DETAIL.get(niveau, CONSIGNES_DETAIL['standard'])}\n")
+            f"- Niveau de détail des rapports : **{niveau}** — "
+            f"{CONSIGNES_DETAIL.get(niveau, CONSIGNES_DETAIL['standard'])}\n")
 
 
 def destinataire_alertes() -> str:
@@ -72,6 +75,23 @@ def destinataire_alertes() -> str:
 # ---------------------------------------------------------------------------
 # Connecteur e-mail (Gmail SMTP) — exposé à l'agent comme tool in-process
 # ---------------------------------------------------------------------------
+def serveur_smtp() -> tuple[str, int]:
+    return os.getenv("SMTP_HOTE", "smtp.gmail.com"), int(os.getenv("SMTP_PORT", "465"))
+
+
+@contextmanager
+def connexion_smtp() -> Generator[smtplib.SMTP_SSL, None, None]:
+    """Connexion SMTP authentifiée (commune à l'envoi et au test du connecteur Gmail).
+
+    Contexte TLS vérifié (certificat + nom d'hôte) : sans lui, SMTP_SSL ne vérifie rien et le
+    mot de passe d'application pourrait être intercepté (attaque de l'homme du milieu).
+    """
+    hote, port = serveur_smtp()
+    with smtplib.SMTP_SSL(hote, port, timeout=20, context=ssl.create_default_context()) as smtp:
+        smtp.login(os.environ["SMTP_UTILISATEUR"], os.environ["SMTP_MOT_DE_PASSE"])
+        yield smtp
+
+
 def envoyer_email(sujet: str, corps: str) -> dict:
     """Envoie un e-mail via Gmail (SMTP + mot de passe d'application).
 
@@ -87,19 +107,15 @@ def envoyer_email(sujet: str, corps: str) -> dict:
     msg.set_content(corps)
 
     if utilisateur and mot_de_passe and destinataire:
-        hote = os.getenv("SMTP_HOTE", "smtp.gmail.com")
-        port = int(os.getenv("SMTP_PORT", "465"))
-        # Contexte TLS vérifié (certificat + nom d'hôte) : sans lui, SMTP_SSL ne vérifie rien
-        # et le mot de passe d'application pourrait être intercepté (attaque de l'homme du milieu).
-        with smtplib.SMTP_SSL(hote, port, timeout=20, context=ssl.create_default_context()) as smtp:
-            smtp.login(utilisateur, mot_de_passe)
+        with connexion_smtp() as smtp:
             smtp.send_message(msg)
         return {"envoye": True, "destinataire": destinataire}
 
     OUTBOX.mkdir(parents=True, exist_ok=True)
     fichier = OUTBOX / f"alerte_{len(list(OUTBOX.glob('*.eml'))) + 1:03d}.eml"
     fichier.write_bytes(bytes(msg))
-    return {"envoye": False, "mode": "démonstration", "fichier": fichier.relative_to(ROOT).as_posix(),
+    affiche = fichier.relative_to(ROOT).as_posix() if fichier.is_relative_to(ROOT) else str(fichier)
+    return {"envoye": False, "mode": "démonstration", "fichier": affiche,
             "info": "SMTP non configuré dans .env : e-mail enregistré localement."}
 
 
@@ -113,7 +129,7 @@ def envoyer_email(sujet: str, corps: str) -> dict:
 async def outil_envoyer_alerte(args: dict[str, Any]) -> dict[str, Any]:
     try:
         resultat = await asyncio.to_thread(envoyer_email, args["sujet"], args["corps"])
-    except Exception as e:  # erreur SMTP, réseau, authentification
+    except (smtplib.SMTPException, OSError) as e:  # erreur SMTP, réseau, TLS, authentification
         resultat = {"envoye": False, "erreur": str(e)}
     return {"content": [{"type": "text", "text": json.dumps(resultat, ensure_ascii=False)}]}
 
@@ -198,7 +214,8 @@ def _boucle_dediee(prompt: str, session_id: str | None) -> dict:
 async def interroger_agent(prompt: str, session_id: str | None = None) -> dict:
     try:
         return await asyncio.to_thread(_boucle_dediee, prompt, session_id)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001  frontière volontaire : erreurs du SDK, du CLI ou groupes
+        # d'exceptions anyio ; l'interface doit recevoir un message lisible, jamais une erreur 500.
         nom = type(e).__name__
         conseil = ""
         if nom == "CLINotFoundError":

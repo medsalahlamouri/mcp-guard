@@ -6,7 +6,10 @@ Partagée entre le serveur MCP (tools approuver / vérifier) et le backend web
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -72,27 +75,64 @@ CREATE TABLE IF NOT EXISTS sessions (
 PREFERENCES_DEFAUT = {"niveau_detail": "standard", "email_notification": ""}
 NIVEAUX_DETAIL = ("synthétique", "standard", "détaillé")
 
+# Liste blanche des tables : seuls ces noms peuvent apparaître dans une requête construite par le code
+# (les valeurs, elles, sont TOUJOURS passées en paramètres « ? », jamais concaténées).
+TABLES = ("serveurs_approuves", "audits", "alertes", "journal", "sources", "preferences", "sessions")
+IDENTIFIANT = re.compile(r"^[a-z_]+$")
+
 # Colonnes ajoutées après la première version : migration douce (les audits existants sont conservés).
 MIGRATIONS = {
     "audits": {"drive_lien": "TEXT", "drive_statut": "TEXT", "email_statut": "TEXT"},
 }
+
+_bases_initialisees: set[Path] = set()
 
 
 def maintenant() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def connexion() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+def _identifiant_sur(nom: str, autorises: tuple[str, ...] | None = None) -> str:
+    """Refuse tout identifiant SQL hors liste blanche (défense en profondeur : ils sont tous constants)."""
+    if not IDENTIFIANT.match(nom) or (autorises is not None and nom not in autorises):
+        raise ValueError(f"Identifiant SQL non autorisé : {nom!r}")
+    return nom
+
+
+def _initialiser(con: sqlite3.Connection) -> None:
+    """Crée les tables et applique les migrations douces (une seule fois par base et par processus)."""
     con.executescript(SCHEMA)
     for table, colonnes in MIGRATIONS.items():
-        existantes = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        _identifiant_sur(table, TABLES)
+        existantes = {r[0] for r in con.execute("SELECT name FROM pragma_table_info(?)", (table,))}
         for nom, type_ in colonnes.items():
             if nom not in existantes:
-                con.execute(f"ALTER TABLE {table} ADD COLUMN {nom} {type_}")
-    return con
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {_identifiant_sur(nom)} "
+                            f"{_identifiant_sur(type_.lower()).upper()}")
+    con.commit()
+
+
+@contextmanager
+def connexion() -> Generator[sqlite3.Connection, None, None]:
+    """Connexion SQLite : validée (commit) si le bloc réussit, annulée sinon, et TOUJOURS fermée.
+
+    (Le « with » natif de sqlite3 valide la transaction mais ne ferme pas la connexion.)
+    """
+    chemin = DB_PATH
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(chemin, timeout=10)
+    con.row_factory = sqlite3.Row
+    try:
+        if chemin not in _bases_initialisees:
+            _initialiser(con)
+            _bases_initialisees.add(chemin)
+        yield con
+        con.commit()
+    except BaseException:
+        con.rollback()
+        raise
+    finally:
+        con.close()
 
 
 def journaliser(evenement: str, details: dict | str = "") -> None:
@@ -106,7 +146,8 @@ def journaliser(evenement: str, details: dict | str = "") -> None:
 def approuver(nom: str, chemin: str, empreinte: dict) -> None:
     with connexion() as con:
         con.execute(
-            "INSERT OR REPLACE INTO serveurs_approuves (nom, chemin, empreinte, date_approbation, statut, derniere_verification) "
+            "INSERT OR REPLACE INTO serveurs_approuves "
+            "(nom, chemin, empreinte, date_approbation, statut, derniere_verification) "
             "VALUES (?,?,?,?, 'approuvé', ?)",
             (nom, chemin, json.dumps(empreinte), maintenant(), maintenant()))
     journaliser("approbation", {"nom": nom, "chemin": chemin})
@@ -126,7 +167,7 @@ def lister_approuves() -> list[dict]:
     with connexion() as con:
         lignes = con.execute("SELECT nom, chemin, date_approbation, statut, derniere_verification "
                              "FROM serveurs_approuves ORDER BY date_approbation DESC").fetchall()
-    return [dict(l) for l in lignes]
+    return [dict(ligne) for ligne in lignes]
 
 
 def changer_statut(nom: str, statut: str) -> None:
@@ -149,7 +190,7 @@ def lister_audits(limite: int = 50) -> list[dict]:
     with connexion() as con:
         lignes = con.execute("SELECT id, date, cible, type, score, verdict, cout_usd, drive_lien, drive_statut, "
                              "email_statut FROM audits ORDER BY id DESC LIMIT ?", (limite,)).fetchall()
-    return [dict(l) for l in lignes]
+    return [dict(ligne) for ligne in lignes]
 
 
 def rechercher_audits(cible: str = "", limite: int = 10) -> list[dict]:
@@ -158,20 +199,22 @@ def rechercher_audits(cible: str = "", limite: int = 10) -> list[dict]:
         lignes = con.execute("SELECT id, date, cible, type, score, verdict, drive_lien FROM audits "
                              "WHERE cible LIKE ? ORDER BY id DESC LIMIT ?",
                              (f"%{cible}%", max(1, min(limite, 50)))).fetchall()
-    return [dict(l) for l in lignes]
+    return [dict(ligne) for ligne in lignes]
 
 
 def lire_preferences() -> dict:
     with connexion() as con:
         lignes = con.execute("SELECT cle, valeur FROM preferences").fetchall()
-    return {**PREFERENCES_DEFAUT, **{l["cle"]: l["valeur"] for l in lignes if l["cle"] in PREFERENCES_DEFAUT}}
+    enregistrees = {ligne["cle"]: ligne["valeur"] for ligne in lignes if ligne["cle"] in PREFERENCES_DEFAUT}
+    return {**PREFERENCES_DEFAUT, **enregistrees}
 
 
 def ecrire_preference(cle: str, valeur: str) -> None:
     if cle not in PREFERENCES_DEFAUT:
         raise ValueError(f"Préférence inconnue : {cle}")
     with connexion() as con:
-        con.execute("INSERT OR REPLACE INTO preferences (cle, valeur, date) VALUES (?,?,?)", (cle, valeur, maintenant()))
+        con.execute("INSERT OR REPLACE INTO preferences (cle, valeur, date) VALUES (?,?,?)",
+                    (cle, valeur, maintenant()))
     journaliser("preference", {"cle": cle})
 
 
@@ -200,7 +243,7 @@ def completer_sessions_depuis_audits() -> None:
 def lister_sessions(limite: int = 15) -> list[dict]:
     with connexion() as con:
         lignes = con.execute("SELECT * FROM sessions ORDER BY mise_a_jour DESC LIMIT ?", (limite,)).fetchall()
-    return [dict(l) for l in lignes]
+    return [dict(ligne) for ligne in lignes]
 
 
 def compter_evenements(evenement: str) -> int:
@@ -209,10 +252,11 @@ def compter_evenements(evenement: str) -> int:
 
 
 def compter_tables() -> dict:
+    """Nombre de lignes de chaque table de la liste blanche (onglet Fonctionnalités, carte Mémoire)."""
     with connexion() as con:
-        tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' "
-                                            "AND name NOT LIKE 'sqlite_%' ORDER BY name")]
-        return {t: con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
+        existantes = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        return {t: con.execute(f"SELECT COUNT(*) FROM {_identifiant_sur(t, TABLES)}").fetchone()[0]
+                for t in sorted(TABLES) if t in existantes}
 
 
 def maj_envois_audit(audit_id: int, drive_lien: str | None, drive_statut: str, email_statut: str) -> None:
@@ -268,4 +312,4 @@ def ajouter_alerte(cible: str, type_: str, message: str) -> None:
 def lister_alertes(limite: int = 50) -> list[dict]:
     with connexion() as con:
         lignes = con.execute("SELECT * FROM alertes ORDER BY id DESC LIMIT ?", (limite,)).fetchall()
-    return [dict(l) for l in lignes]
+    return [dict(ligne) for ligne in lignes]
