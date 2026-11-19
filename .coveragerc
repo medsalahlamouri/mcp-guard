@@ -1,0 +1,10 @@
+# Couverture des tests : python -m coverage run -m unittest discover -s tests  puis  python -m coverage report
+[run]
+source = backend, mcp_server, plugin
+omit =
+    # Script interactif d'autorisation OAuth (ouvre un navigateur) : testé manuellement.
+    backend/autoriser_drive.py
+
+[report]
+skip_empty = true
+show_missing = false

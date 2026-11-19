@@ -6,6 +6,7 @@ Partagée entre le serveur MCP (tools approuver / vérifier) et le backend web
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from collections.abc import Generator
@@ -13,7 +14,9 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "mcp_guard.db"
+# Chemin de la base : data/mcp_guard.db, ou MCPGUARD_BASE si cette variable est définie (tests, autre poste).
+# Lu au démarrage du processus : le serveur MCP (sous-processus) hérite de la même variable.
+DB_PATH = Path(os.getenv("MCPGUARD_BASE") or Path(__file__).resolve().parent.parent / "data" / "mcp_guard.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS serveurs_approuves (
@@ -176,7 +179,8 @@ def changer_statut(nom: str, statut: str) -> None:
                     (statut, maintenant(), nom))
 
 
-def enregistrer_audit(cible, type_, score, verdict, rapport, donnees, session_id=None, cout=None) -> int:
+def enregistrer_audit(cible: str, type_: str, score: int, verdict: str, rapport: str, donnees: dict,
+                      session_id: str | None = None, cout: float | None = None) -> int:
     with connexion() as con:
         cur = con.execute(
             "INSERT INTO audits (date, cible, type, score, verdict, rapport, donnees, session_id, cout_usd) "

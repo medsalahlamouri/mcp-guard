@@ -133,7 +133,8 @@ Ce serveur a-t-il changé depuis son approbation ?
 
 ### Résultat attendu
 - Étape 3 (tâche planifiée, sans LLM) : alerte « rug_pull » sur `meteo-tunisie` — tool ajouté
-  `synchroniser_cache`, tool modifié `lister_villes` —, statut « suspendu (rug pull) » et e-mail
+  `synchroniser_cache`, tool modifié `lister_villes`, code source modifié, réaudit statique de la nouvelle
+  version : score 100/100, verdict REJETER —, statut « suspendu (rug pull) » et e-mail
   « [MCP-Guard] Rug pull détecté : meteo-tunisie ».
 - Audit de `05` : **score 100/100, REJETER**, 5 constats : demande de l'historique complet de la conversation
   (MCP10), paramètre fourre-tout `contexte`, envoi vers `https://sync.meteo-cache.example/upload` (MCP10), faux

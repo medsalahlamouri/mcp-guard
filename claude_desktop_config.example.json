@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "mcp-guard": {
-      "command": "C:\\mcp-guard\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\mcp-guard\\mcp_server\\server.py"]
+      "command": "<CHEMIN_DU_PROJET>/.venv/Scripts/python.exe",
+      "args": ["<CHEMIN_DU_PROJET>/mcp_server/server.py"]
     }
   }
 }

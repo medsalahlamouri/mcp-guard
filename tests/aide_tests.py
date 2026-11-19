@@ -31,13 +31,15 @@ ENV_TEST = {
     "DRIVE_CREDENTIALS": str(TMP / "absent_credentials.json"),
     "DRIVE_TOKEN": str(TMP / "absent_token.json"),
     "MCPGUARD_REAUDIT_MINUTES": "0",
+    # Base temporaire, transmise aussi aux sous-processus (serveur MCP lancé en stdio).
+    "MCPGUARD_BASE": str(TMP / "mcp_guard_test.db"),
 }
 os.environ.update(ENV_TEST)
 logging.disable(logging.INFO)  # journaux INFO (TestClient, APScheduler) : sortie des tests lisible
 
 from mcp_server import registry  # noqa: E402
 
-registry.DB_PATH = TMP / "mcp_guard_test.db"
+assert registry.DB_PATH == TMP / "mcp_guard_test.db"  # jamais data/mcp_guard.db
 _compteur = 0
 
 

@@ -1,11 +1,13 @@
 """Test d'intégration du serveur MCP « mcp-guard » : vrai client MCP en stdio (tools/list + appels).
 
-Aucun LLM, aucun réseau. Seuls des tools en lecture seule sont appelés : la base SQLite réelle n'est pas modifiée.
+Aucun LLM, aucun réseau. Le serveur reçoit MCPGUARD_BASE : il écrit son journal dans une base temporaire,
+jamais dans data/mcp_guard.db.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import unittest
 
@@ -29,7 +31,7 @@ def _donnees(resultat) -> dict | list:
 
 async def _session(appels: list[tuple[str, dict]]) -> tuple[set[str], dict]:
     params = StdioServerParameters(command=sys.executable, args=[str(aide_tests.ROOT / "mcp_server" / "server.py")],
-                                   cwd=str(aide_tests.ROOT))
+                                   cwd=str(aide_tests.ROOT), env=dict(os.environ))
     async with stdio_client(params) as (lecture, ecriture), ClientSession(lecture, ecriture) as session:
         await session.initialize()
         noms = {t.name for t in (await session.list_tools()).tools}
@@ -58,6 +60,12 @@ class TestServeurMcp(unittest.TestCase):
 
     def test_perimetre_respecte(self):
         self.assertIn("PermissionError", self.r["detecter_secrets"]["erreur"])
+
+    def test_base_temporaire_utilisee(self):
+        """Le journal de l'appel audit_complet est écrit dans la base temporaire du test."""
+        from mcp_server import registry
+        registry.DB_PATH = aide_tests.TMP / "mcp_guard_test.db"
+        self.assertIsNotNone(registry.dernier_evenement("audit_tool", "samples/01_serveur_sain"))
 
     def test_knowledge(self):
         resultat = self.r["rechercher_knowledge"]

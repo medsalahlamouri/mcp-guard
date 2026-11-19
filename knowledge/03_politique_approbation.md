@@ -6,8 +6,8 @@
 
 ## 1. Objet
 
-Tout serveur MCP ou toute skill destiné à être connecté à un agent IA du laboratoire doit être
-**audité par MCP-Guard avant installation**. Cette politique fixe les règles d'approbation.
+Tout serveur MCP ou toute skill destinés à être connectés à un agent IA du laboratoire doivent être
+**audités par MCP-Guard avant installation**. Cette politique fixe les règles d'approbation.
 
 ## 2. Règles d'approbation
 
@@ -17,10 +17,10 @@ Tout serveur MCP ou toute skill destiné à être connecté à un agent IA du la
    Un verdict **CORRIGER** impose un nouvel audit après correction. Un verdict **REJETER**
    interdit l'installation.
 3. **Empreinte d'approbation** : à l'approbation, l'empreinte SHA-256 des définitions de tools
-   est enregistrée dans le registre des serveurs approuvés.
+   et celle du code source sont enregistrées dans le registre des serveurs approuvés.
 4. **Réaudit automatique** : les serveurs approuvés sont réaudités automatiquement chaque jour.
-   Toute modification d'empreinte suspend l'approbation (scénario « rug pull ») et déclenche
-   une alerte.
+   Toute modification d'empreinte, des définitions de tools comme du code seul, suspend l'approbation
+   (scénario « rug pull ») et déclenche une alerte ; la nouvelle version est réauditée.
 5. **Interdictions absolues** : sont refusés sans discussion les serveurs ou skills qui
    - contiennent des instructions cachées destinées au modèle ;
    - lisent ou transmettent des secrets (`~/.ssh`, `.env`, identifiants cloud, variables

@@ -22,7 +22,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 from backend import agent, connecteurs
 from mcp_server import analyzers as az
@@ -89,13 +92,13 @@ _verrou_sdk = threading.Lock()
 _cache_sdk: dict = {"t": 0.0, "donnees": None}
 
 
-def configurer(planificateur, reaudit) -> None:
+def configurer(planificateur: Any, reaudit: Callable[[], dict]) -> None:
     """Le backend fournit son planificateur et sa fonction de ré-audit (carte Bonus)."""
     global _planificateur, _reaudit
     _planificateur, _reaudit = planificateur, reaudit
 
 
-def _boucle(coroutine):
+def _boucle(coroutine: Coroutine[Any, Any, Any]) -> Any:
     boucle = asyncio.ProactorEventLoop() if sys.platform == "win32" else asyncio.new_event_loop()
     try:
         return boucle.run_until_complete(coroutine)
@@ -175,14 +178,14 @@ def client_mcp(appels: list[tuple[str, dict]]) -> dict:
     return _boucle(_client())
 
 
-def _json(texte: str):
+def _json(texte: str) -> Any:
     try:
         return json.loads(texte)
     except ValueError:
         return texte
 
 
-def _module_osv():
+def _module_osv() -> ModuleType:
     spec = importlib.util.spec_from_file_location("serveur_osv", ROOT / "plugin" / "osv-scanner" / "serveur_osv.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

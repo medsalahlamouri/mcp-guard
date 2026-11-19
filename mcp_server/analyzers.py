@@ -57,7 +57,8 @@ def fichiers_a_auditer(chemin: Path) -> list[Path]:
     return sorted(p for p in chemin.rglob("*") if p.is_file() and p.suffix in exts)
 
 
-def constat(regle, gravite, owasp, titre, explication, preuve="", tool=None, ligne=None):
+def constat(regle: str, gravite: str, owasp: str, titre: str, explication: str, preuve: str = "",
+            tool: str | None = None, ligne: int | None = None) -> dict:
     return {
         "regle": regle,
         "gravite": gravite,

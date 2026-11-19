@@ -1,6 +1,6 @@
 {
   "name": "osv-scanner",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Plugin MCP-Guard : détecte les vulnérabilités connues (CVE, GHSA) des dépendances d'un serveur MCP ou d'une skill via la base publique OSV.dev.",
   "author": {
     "name": "Med Salah Lamouri — ISET Nabeul, RSI3"

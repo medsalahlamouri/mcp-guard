@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from backend.agent import connexion_smtp, destinataire_alertes, envoyer_email, serveur_smtp  # Gmail
 from mcp_server import analyzers as az
@@ -88,7 +89,7 @@ def drive_configure() -> bool:
     return chemin_credentials().exists() and chemin_token().exists()
 
 
-def service_drive():
+def service_drive() -> Any:  # googleapiclient.discovery.Resource (import différé)
     """Client Drive authentifié (le jeton est rafraîchi automatiquement s'il a expiré)."""
     import google_auth_httplib2
     import httplib2
@@ -110,7 +111,7 @@ def service_drive():
     return build("drive", "v3", http=http, cache_discovery=False)
 
 
-def _dossier(service, nom: str, parent: str) -> str:
+def _dossier(service: Any, nom: str, parent: str) -> str:
     """Retrouve (ou crée) un dossier par son nom sous un parent. Avec drive.file, seuls les
     dossiers créés par MCP-Guard sont visibles : aucun accès au reste du Drive."""
     cle = f"{parent}/{nom}"
@@ -128,11 +129,11 @@ def _dossier(service, nom: str, parent: str) -> str:
     return id_
 
 
-def dossier_racine(service) -> str:
+def dossier_racine(service: Any) -> str:
     return _dossier(service, os.getenv("DRIVE_DOSSIER_RACINE") or "MCP-Guard", "root")
 
 
-def televerser_markdown(service, parent: str, nom: str, texte: str, convertir: bool = True) -> dict:
+def televerser_markdown(service: Any, parent: str, nom: str, texte: str, convertir: bool = True) -> dict:
     """Envoie un texte Markdown ; avec convertir=True, Drive le convertit en Google Docs (mise en forme)."""
     from googleapiclient.http import MediaInMemoryUpload
 

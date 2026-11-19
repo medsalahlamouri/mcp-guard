@@ -3,11 +3,13 @@
 **Projet** : MCP-Guard, agent d'audit de sécurité des serveurs MCP et des skills avant leur installation
 **Auteur** : Med Salah Lamouri — RSI3, ISET Nabeul · **Module** : Conception et déploiement d'un agent IA
 
-Ce document reprend, pour chacune des 9 fonctionnalités de l'énoncé, sa **définition**, sa
-**réalisation** dans MCP-Guard, les **fichiers** concernés, la **justification** de son usage et la
-**preuve** qu'elle fonctionne. Toutes les preuves sont reproductibles dans l'onglet
-**Fonctionnalités** de l'interface : chaque carte affiche l'état en direct et un bouton *Tester*
-qui lance un test réel **sans appeler le LLM** (aucun quota consommé, aucun e-mail envoyé).
+Ce document est la **référence** des fonctionnalités du projet (le README y renvoie). Il reprend, pour
+chacune des 9 fonctionnalités de l'énoncé, sa **définition**, sa **réalisation** dans MCP-Guard, les
+**fichiers** concernés, la **justification** de son usage et la **preuve** qu'elle fonctionne. Toutes les
+preuves sont reproductibles dans l'onglet **Fonctionnalités** de l'interface (code :
+`backend/demo/fonctionnalites.py`) : chaque carte affiche l'état en direct et un bouton *Tester* qui lance un
+test réel **sans appeler le LLM** (aucun quota consommé, aucun e-mail envoyé). Les tests automatisés de
+`tests/` vérifient en plus chaque fonctionnalité sans aucun compte (services externes simulés).
 
 > Résultat de « Tout tester » sur le PC de démonstration : **9/9 fonctionnalités opérationnelles + bonus**.
 
@@ -52,7 +54,7 @@ vérifie que `--system-prompt` est **identique** au fichier (3 565 caractères, 
 
 **Énoncé** : « Capacités spécifiques définies (ex : savoir analyser un fichier JSON). »
 
-**Réalisation** : trois skills packagées dans le plugin `mcp-guard` :
+**Réalisation** : trois skills regroupées dans le plugin `mcp-guard` :
 
 | Skill | Capacité |
 |---|---|
@@ -102,11 +104,11 @@ fonctions déterministes : le verdict est reproductible et le code audité n'est
 **Énoncé** : « Liaison avec des services externes (Slack, Teams, GitHub, ServiceNow). »
 
 **Réalisation** : trois connecteurs, déclenchés par le **backend** (déterministe, sans LLM), dans
-`backend/connecteurs.py` et `backend/app.py` :
+`backend/connecteurs.py` (Drive, Gmail) et `backend/routes/elements.py` (import GitHub) :
 
 | Connecteur | Rôle | Technique |
 |---|---|---|
-| **GitHub** | Bouton *Importer* : récupère un dépôt à auditer, avec son commit | API REST (`api.github.com`), jeton `GITHUB_TOKEN` du `.env` (pas de `git clone`), 30 fichiers max |
+| **GitHub** | Bouton *Importer* : récupère un dépôt à auditer, avec son commit | API REST (`api.github.com`), jeton `GITHUB_TOKEN` du `.env` (pas de `git clone`), URL validée strictement, 30 fichiers au plus |
 | **Google Drive** | Après **chaque** audit : rapport archivé dans `MCP-Guard/Rapports/AAAA-MM/AAAA-MM-JJ_HHhMM_<nom>_<VERDICT>` (converti en Google Docs) ; lien enregistré en SQLite et affiché dans l'Historique | API Drive v3, OAuth2, scope `drive.file` |
 | **Gmail** | Après **chaque** audit : e-mail « [MCP-Guard] ✅/⚠️/🚨 VERDICT – nom – score X/100 » avec source (samples, dépôt ou URL GitHub + commit), date, score, niveau, 3 constats les plus graves (secrets masqués) et lien Drive | SMTP SSL avec certificat vérifié, mot de passe d'application |
 
@@ -134,8 +136,8 @@ d'e-mail, puis crée, relit et **supprime** un document de test dans Drive.
 | `plugin/mcp-guard` | 3 skills | Méthodes d'audit et format du rapport |
 | `plugin/osv-scanner` | Son propre serveur MCP (`.mcp.json` → `serveur_osv.py`) | Tool `analyser_dependances` : lit de façon statique `requirements*.txt`, `pyproject.toml`, `package.json` et les imports Python, puis interroge l'API **OSV.dev** (requête groupée) pour lister les CVE/GHSA des dépendances |
 
-**Justification** : la recherche de vulnérabilités connues est une capacité indépendante, packagée et
-réutilisable telle quelle dans n'importe quel agent Claude Code. Elle complète l'analyse du code par
+**Justification** : la recherche de vulnérabilités connues est une capacité indépendante, empaquetée et
+réutilisable telle quelle dans n'importe quel agent Claude Code (voir `plugin/osv-scanner/README.md`). Elle complète l'analyse du code par
 l'analyse de la **chaîne d'approvisionnement** (OWASP MCP04).
 
 **Preuve** : *Tester* vérifie que les 2 plugins sont chargés (skills présentes, serveur `plugin:osv-scanner:osv`
@@ -234,7 +236,7 @@ les sessions enregistrées sont reprenables (transcript présent). La mission 3 
 | Google Drive | **OAuth2** (ID client « Application de bureau », PKCE, scope minimal `drive.file`) | `credentials.json` + `token.json` (renouvelé automatiquement) |
 | Gmail | Mot de passe d'application (validation en 2 étapes) | `.env` |
 | GitHub | Jeton d'accès personnel (clé API), facultatif | `.env` |
-| Interface web | Mot de passe (comparaison à temps constant) + cookie de session HttpOnly, SameSite=strict | `.env` |
+| Interface web | Mot de passe (comparaison à temps constant, pause d'une seconde après un échec) + cookie de session HttpOnly, SameSite=Strict, valable 12 h ; sessions gardées en mémoire (`backend/securite.py`) | `.env` |
 
 Tous ces fichiers sont dans `.gitignore`, exclus de l'archive du livrable, et **aucune valeur secrète n'est
 jamais affichée** (l'interface indique seulement « défini » ou « vide »). L'interface n'écoute que sur 127.0.0.1.
@@ -244,11 +246,14 @@ sans mot de passe (401), que le jeton Google ne porte que le scope `drive.file` 
 
 ## Bonus : tâche planifiée (hors liste)
 
-APScheduler (`backend/app.py`) ré-audite les serveurs approuvés à intervalle régulier (toutes les 2 minutes en
-mode démonstration, chaque jour à 8 h sinon), **sans LLM** : comparaison des empreintes, suspension de
-l'approbation, alerte et e-mail en cas de rug pull.
+APScheduler (`backend/planification.py`) ré-audite les serveurs approuvés à intervalle régulier (toutes les
+2 minutes en mode démonstration, chaque jour à 8 h sinon), **sans LLM** : comparaison des empreintes des
+définitions de tools **et du code source**, suspension de l'approbation, alerte et e-mail en cas de rug pull.
+Une modification du code seul (descriptions inchangées) est donc aussi détectée ; la nouvelle version est
+réauditée et son verdict figure dans l'alerte.
 
-**Preuve** : *Tester* exécute le ré-audit et affiche son bilan ; la mission 3 montre une détection réelle.
+**Preuve** : *Tester* exécute le ré-audit et affiche son bilan ; la mission 3 montre une détection réelle ;
+`tests/test_planification.py` vérifie la suspension, l'alerte et l'e-mail.
 
 ---
 
