@@ -1,6 +1,6 @@
 # MCP-Guard — agent d'audit de sécurité des serveurs MCP et des skills
 
-**Auteur** : Med Salah Lamouri — RSI3, ISET Nabeul · **Examen** : Conception et déploiement d'un agent IA
+**Auteur** : Mohamed Salah Lamouri — RSI3, ISET Nabeul
 
 MCP-Guard est un agent IA qui audite un **serveur MCP** ou une **skill** *avant* son installation. Il détecte
 le tool poisoning, l'injection de commande, le path traversal, les secrets en dur, l'exfiltration de données,
@@ -8,8 +8,6 @@ les dépendances vulnérables et les modifications après approbation (« rug pu
 décision — **INSTALLER**, **CORRIGER** ou **REJETER** — selon l'OWASP MCP Top 10 (2025). Chaque rapport est
 archivé dans Google Drive et notifié par e-mail.
 
-📄 Justification détaillée des 9 fonctionnalités : [docs/FONCTIONNALITES.md](docs/FONCTIONNALITES.md)
-🎯 Les 3 missions de démonstration : [docs/MISSIONS.md](docs/MISSIONS.md)
 
 ---
 
