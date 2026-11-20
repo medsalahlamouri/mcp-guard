@@ -14,13 +14,13 @@ import json
 import os
 import re
 import smtplib
-import ssl
 import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from backend.agent import envoyer_email  # connecteur Gmail SMTP existant
+from backend.agent import connexion_smtp, destinataire_alertes, envoyer_email, serveur_smtp  # Gmail
 from mcp_server import analyzers as az
 from mcp_server import registry
 
@@ -53,6 +53,21 @@ def _court(e: Exception) -> str:
     return f"{type(e).__name__} : {str(e)[:300]}"
 
 
+def erreurs_drive() -> tuple[type[Exception], ...]:
+    """Exceptions attendues d'un appel Google Drive : réseau, API, OAuth, jeton absent ou invalide.
+
+    Importées seulement quand une erreur survient (l'expression d'un « except » n'est évaluée qu'à ce moment).
+    """
+    from google.auth.exceptions import GoogleAuthError
+    from googleapiclient.errors import Error as ErreurApiGoogle
+    from httplib2 import HttpLib2Error
+
+    return (OSError, RuntimeError, ValueError, KeyError, GoogleAuthError, ErreurApiGoogle, HttpLib2Error)
+
+
+ERREURS_EMAIL = (smtplib.SMTPException, OSError)  # SMTP, réseau, TLS (ssl.SSLError hérite d'OSError)
+
+
 def masquer_secrets(texte: str) -> str:
     """Second filet de sécurité : masque tout secret encore présent dans un texte sortant (Drive, e-mail)."""
     for _nom, motif in az.MOTIFS_SECRETS:
@@ -74,7 +89,7 @@ def drive_configure() -> bool:
     return chemin_credentials().exists() and chemin_token().exists()
 
 
-def service_drive():
+def service_drive() -> Any:  # googleapiclient.discovery.Resource (import différé)
     """Client Drive authentifié (le jeton est rafraîchi automatiquement s'il a expiré)."""
     import google_auth_httplib2
     import httplib2
@@ -96,7 +111,7 @@ def service_drive():
     return build("drive", "v3", http=http, cache_discovery=False)
 
 
-def _dossier(service, nom: str, parent: str) -> str:
+def _dossier(service: Any, nom: str, parent: str) -> str:
     """Retrouve (ou crée) un dossier par son nom sous un parent. Avec drive.file, seuls les
     dossiers créés par MCP-Guard sont visibles : aucun accès au reste du Drive."""
     cle = f"{parent}/{nom}"
@@ -114,11 +129,11 @@ def _dossier(service, nom: str, parent: str) -> str:
     return id_
 
 
-def dossier_racine(service) -> str:
+def dossier_racine(service: Any) -> str:
     return _dossier(service, os.getenv("DRIVE_DOSSIER_RACINE") or "MCP-Guard", "root")
 
 
-def televerser_markdown(service, parent: str, nom: str, texte: str, convertir: bool = True) -> dict:
+def televerser_markdown(service: Any, parent: str, nom: str, texte: str, convertir: bool = True) -> dict:
     """Envoie un texte Markdown ; avec convertir=True, Drive le convertit en Google Docs (mise en forme)."""
     from googleapiclient.http import MediaInMemoryUpload
 
@@ -214,7 +229,8 @@ def construire_corps(audit_id: int, chemin: str, donnees: dict, quand: datetime,
         for i, c in enumerate(principaux, 1):
             ou = f" — tool {c['tool']}" if c.get("tool") else ""
             ou += f", ligne {c['ligne']}" if c.get("ligne") else ""
-            lignes.append(f"  {i}. [{LIBELLES_GRAVITE.get(c['gravite'], c['gravite'])}] {c['owasp']} – {c['titre']}{ou}")
+            gravite = LIBELLES_GRAVITE.get(c["gravite"], c["gravite"])
+            lignes.append(f"  {i}. [{gravite}] {c['owasp']} – {c['titre']}{ou}")
             if c.get("preuve"):
                 lignes.append(f"     Preuve : {c['preuve']}")
     else:
@@ -253,7 +269,7 @@ def apres_audit(audit_id: int, chemin: str, donnees: dict, rapport: str, erreur_
                 f = archiver_rapport(f"{quand:%Y-%m-%d_%Hh%M}_{_nom_fichier(nom)}_{verdict}",
                                      masquer_secrets(entete + corps_rapport), quand)
                 drive = {"statut": "ok", "lien": f["webViewLink"], "nom": f["name"], "format": f["format"]}
-            except Exception as e:
+            except erreurs_drive() as e:
                 drive = {"statut": "erreur", "lien": None, "message": _court(e)}
         registry.journaliser("drive_envoi", {"audit_id": audit_id, "ok": drive["statut"] == "ok",
                                              **{k: v for k, v in drive.items() if k != "statut"},
@@ -266,7 +282,7 @@ def apres_audit(audit_id: int, chemin: str, donnees: dict, rapport: str, erreur_
             r = envoyer_email(construire_sujet(nom, verdict, donnees["score"]),
                               construire_corps(audit_id, chemin, donnees, quand, drive))
             email = {"statut": "ok" if r.get("envoye") else "démonstration", **r}
-        except Exception as e:  # SMTP, réseau, authentification : l'audit reste valide
+        except ERREURS_EMAIL as e:  # SMTP, réseau, authentification : l'audit reste valide
             email = {"statut": "erreur", "message": _court(e)}
         registry.journaliser("email_envoi", {"audit_id": audit_id, "ok": email["statut"] in ("ok", "démonstration"),
                                              **email})
@@ -282,16 +298,18 @@ def apres_audit(audit_id: int, chemin: str, donnees: dict, rapport: str, erreur_
 # État et tests des connecteurs (aucun envoi d'e-mail, aucun fichier laissé dans Drive)
 # ---------------------------------------------------------------------------
 def gmail_configure() -> bool:
-    return all(os.getenv(k) for k in ("SMTP_UTILISATEUR", "SMTP_MOT_DE_PASSE", "ALERTE_DESTINATAIRE"))
+    """Même règle que l'envoi réel : identifiants SMTP + destinataire (Préférences, sinon .env)."""
+    return bool(os.getenv("SMTP_UTILISATEUR") and os.getenv("SMTP_MOT_DE_PASSE") and destinataire_alertes())
 
 
 def tester_gmail() -> str:
     """Connexion + authentification SMTP, puis déconnexion : aucun e-mail n'est envoyé."""
     if not gmail_configure():
-        raise RuntimeError("SMTP_UTILISATEUR, SMTP_MOT_DE_PASSE ou ALERTE_DESTINATAIRE vide dans .env")
-    hote, port = os.getenv("SMTP_HOTE", "smtp.gmail.com"), int(os.getenv("SMTP_PORT", "465"))
-    with smtplib.SMTP_SSL(hote, port, timeout=20, context=ssl.create_default_context()) as smtp:
-        smtp.login(os.environ["SMTP_UTILISATEUR"], os.environ["SMTP_MOT_DE_PASSE"])
+        raise RuntimeError("SMTP_UTILISATEUR ou SMTP_MOT_DE_PASSE vide dans .env, ou aucun destinataire "
+                           "(ALERTE_DESTINATAIRE dans .env ou adresse des Préférences)")
+    with connexion_smtp():
+        pass  # connexion + authentification puis déconnexion : aucun e-mail envoyé
+    hote, port = serveur_smtp()
     return f"Authentification SMTP réussie sur {hote}:{port} (aucun e-mail envoyé)"
 
 
@@ -341,7 +359,7 @@ USAGES = {"gmail": ["email_envoi"], "drive": ["drive_envoi"], "github": ["import
 def tester(nom: str) -> dict:
     try:
         resultat = {"connecteur": nom, "ok": True, "message": TESTS[nom]()}
-    except Exception as e:
+    except (*ERREURS_EMAIL, *erreurs_drive()) as e:  # couvre aussi les erreurs réseau et HTTP de GitHub
         resultat = {"connecteur": nom, "ok": False, "message": _court(e)}
     registry.journaliser("test_connecteur", resultat)
     return resultat

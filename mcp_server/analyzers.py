@@ -57,7 +57,8 @@ def fichiers_a_auditer(chemin: Path) -> list[Path]:
     return sorted(p for p in chemin.rglob("*") if p.is_file() and p.suffix in exts)
 
 
-def constat(regle, gravite, owasp, titre, explication, preuve="", tool=None, ligne=None):
+def constat(regle: str, gravite: str, owasp: str, titre: str, explication: str, preuve: str = "",
+            tool: str | None = None, ligne: int | None = None) -> dict:
     return {
         "regle": regle,
         "gravite": gravite,
@@ -199,7 +200,8 @@ def analyser_descriptions(tools: list[dict]) -> list[dict]:
             n = len(INVISIBLES.findall(desc))
             constats.append(constat("caracteres_invisibles", "eleve", "MCP03",
                                     "Caractères invisibles dans la description",
-                                    f"{n} caractère(s) invisible(s) (zero-width/bidi) peuvent cacher du texte à l'humain.",
+                                    f"{n} caractère(s) invisible(s) (zero-width/bidi) "
+                                    "peuvent cacher du texte à l'humain.",
                                     repr(desc[:120]), t["nom"], t["ligne"]))
         suspects = [p["nom"] for p in t["parametres"] if p["nom"].lower() in PARAMS_FOURRE_TOUT]
         for p in suspects:
@@ -207,11 +209,13 @@ def analyser_descriptions(tools: list[dict]) -> list[dict]:
             constats.append(constat("parametre_fourre_tout", gravite, "MCP03",
                                     f"Paramètre fourre-tout « {p} »",
                                     "Un paramètre libre sans lien avec la fonction peut servir de canal d'exfiltration."
-                                    + (" La description demande explicitement de le remplir." if gravite == "critique" else ""),
+                                    + (" La description demande explicitement de le remplir."
+                                       if gravite == "critique" else ""),
                                     f"paramètres : {[x['nom'] for x in t['parametres']]}", t["nom"], t["ligne"]))
         if len(desc) > 1200:
             constats.append(constat("description_longue", "faible", "MCP03", "Description anormalement longue",
-                                    f"{len(desc)} caractères : une description longue peut dissimuler des instructions.",
+                                    f"{len(desc)} caractères : une description longue "
+                                    "peut dissimuler des instructions.",
                                     "", t["nom"], t["ligne"]))
     return constats
 
@@ -244,7 +248,8 @@ def analyser_secrets(chemin: Path) -> list[dict]:
                 if m and (f.name, num) not in vus:
                     vus.add((f.name, num))
                     constats.append(constat("secret_en_dur", "eleve", "MCP01", f"{nom} écrit en dur",
-                                            "Un secret dans le code source est exposé à toute personne qui lit le dépôt.",
+                                            "Un secret dans le code source est exposé à toute personne "
+                                            "qui lit le dépôt.",
                                             f"{f.name}:{num} → {_masquer(m.group(0))}", None, num))
     return constats
 
@@ -252,14 +257,15 @@ def analyser_secrets(chemin: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 # 4. Code dangereux (MCP05, MCP02, MCP01, MCP10) — analyse AST
 # ---------------------------------------------------------------------------
-VERBES_LECTURE = re.compile(r"\b(lit|lire|liste|lister|lecture|affiche|obtenir|consulte|read|list|get|show|view)\b", re.I)
+VERBES_LECTURE = re.compile(r"\b(lit|lire|liste|lister|lecture|affiche|obtenir|consulte|read|list|get|show|view)\b",
+                            re.I)
 APPELS_DESTRUCTIFS = {"remove", "unlink", "rmtree", "rmdir", "truncate"}
 
 
 def _nom_appel(appel: ast.Call) -> str:
     try:
         return ast.unparse(appel.func)
-    except Exception:  # pragma: no cover
+    except (ValueError, TypeError, AttributeError, RecursionError):  # pragma: no cover
         return ""
 
 
@@ -289,7 +295,8 @@ def analyser_code_python(source: str, fichier: str = "") -> list[dict]:
             preuve = f"{fichier}:{n.lineno} → {ast.unparse(n)[:160]}"
 
             if nom.startswith("subprocess.") and any(
-                    k.arg == "shell" and isinstance(k.value, ast.Constant) and k.value.value is True for k in n.keywords):
+                    k.arg == "shell" and isinstance(k.value, ast.Constant) and k.value.value is True
+                    for k in n.keywords):
                 g = "critique" if _est_dynamique(premier) else "eleve"
                 constats.append(constat("injection_commande", g, "MCP05", "Commande shell avec shell=True",
                                         "La commande est interprétée par un shell : une entrée comme "
@@ -307,7 +314,8 @@ def analyser_code_python(source: str, fichier: str = "") -> list[dict]:
                 constats.append(constat("deserialisation", "eleve", "MCP05", f"Désérialisation dangereuse ({nom})",
                                         "Désérialiser des données non fiables avec pickle permet l'exécution de code.",
                                         preuve, nom_tool, n.lineno))
-            elif nom == "yaml.load" and not any(k.arg == "Loader" and "Safe" in ast.unparse(k.value) for k in n.keywords):
+            elif nom == "yaml.load" and not any(k.arg == "Loader" and "Safe" in ast.unparse(k.value)
+                                                 for k in n.keywords):
                 constats.append(constat("deserialisation", "eleve", "MCP05", "yaml.load sans SafeLoader",
                                         "yaml.load sans SafeLoader peut instancier des objets arbitraires.",
                                         preuve, nom_tool, n.lineno))
@@ -330,11 +338,13 @@ def analyser_code_python(source: str, fichier: str = "") -> list[dict]:
                 if fuite:
                     constats.append(constat("exfiltration", "critique", "MCP10" if "environ" in payload else "MCP01",
                                             "Envoi de données sensibles vers l'extérieur",
-                                            "Le code transmet des secrets, l'environnement ou le contexte de l'agent à un serveur distant.",
+                                            "Le code transmet des secrets, l'environnement ou le contexte de l'agent "
+                                            "à un serveur distant.",
                                             preuve, nom_tool, n.lineno))
                 elif ip_brute and not url.startswith(("'https://127.", '"http://127.')):
                     constats.append(constat("hote_inconnu", "eleve", "MCP04", "Connexion vers une adresse IP brute",
-                                            "Une adresse IP codée en dur, sans nom de domaine documenté, est un indicateur de C2.",
+                                            "Une adresse IP codée en dur, sans nom de domaine documenté, "
+                                            "est un indicateur de C2.",
                                             preuve, nom_tool, n.lineno))
 
         if nom_tool and destructif and VERBES_LECTURE.search(descriptions.get(nom_tool) or ""):
@@ -352,7 +362,7 @@ def analyser_code(chemin: Path) -> list[dict]:
         if f.suffix == ".py":
             try:
                 constats += analyser_code_python(lire_texte(f), f.name)
-            except SyntaxError as e:
+            except (SyntaxError, ValueError) as e:  # ValueError : octet nul dans le fichier
                 constats.append(constat("syntaxe", "info", "-", "Fichier non analysable", str(e), f.name))
     return constats
 
@@ -368,7 +378,7 @@ def lister_imports(chemin: Path) -> list[str]:
                     modules |= {a.name.split(".")[0] for a in n.names}
                 elif isinstance(n, ast.ImportFrom) and n.module and n.level == 0:
                     modules.add(n.module.split(".")[0])
-        except SyntaxError:
+        except (SyntaxError, ValueError):
             continue
     return sorted(modules)
 
@@ -419,7 +429,8 @@ def analyser_skill_texte(texte: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 LANCEURS_PAQUETS = {"npx", "npx.cmd", "uvx", "uvx.exe", "bunx", "pnpx", "pipx"}
 SHELLS = {"bash", "sh", "zsh", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"}
-SCRIPT_DISTANT = re.compile(r"(curl|wget|iwr|invoke-webrequest)\b[^|]*\|\s*(sudo\s+)?(ba|z)?sh\b|\|\s*iex\b|-encodedcommand", re.I)
+SCRIPT_DISTANT = re.compile(r"(curl|wget|iwr|invoke-webrequest)\b[^|]*\|\s*(sudo\s+)?(ba|z)?sh\b"
+                            r"|\|\s*iex\b|-encodedcommand", re.I)
 OPTIONS_DANGEREUSES = re.compile(r"--dangerously-skip-permissions|--no-sandbox|--allow-all|bypassPermissions", re.I)
 CLE_SECRETE = re.compile(r"token|secret|key|passw(or)?d|pwd|credential|auth", re.I)
 VALEUR_FACTICE = re.compile(r"\$\{?\w+\}?|<[^>]+>|(your|votre)[-_ ].*|x{3,}|changeme|\*+", re.I)
@@ -469,35 +480,47 @@ def analyser_config_mcp(chemin: Path) -> list[dict]:
         if SCRIPT_DISTANT.search(ligne_cmd):
             constats.append(constat("config_script_distant", "critique", "MCP04", "Script distant exécuté au lancement",
                                     "La configuration télécharge et exécute un script (curl | sh) à chaque démarrage : "
-                                    "son contenu peut changer à tout moment, sans aucun contrôle.", ligne_cmd, nom, ligne))
+                                    "son contenu peut changer à tout moment, sans aucun contrôle.",
+                                    ligne_cmd, nom, ligne))
         elif commande in SHELLS and any(a.lower() in ("-c", "/c", "-command") for a in args):
             constats.append(constat("config_shell", "eleve", "MCP05", "Serveur lancé via un shell",
-                                    "Lancer un serveur par « bash -c » ou équivalent permet d'enchaîner n'importe quelle "
+                                    "Lancer un serveur par « bash -c » ou équivalent permet "
+                                    "d'enchaîner n'importe quelle "
                                     "commande système.", ligne_cmd, nom, ligne))
         if commande in LANCEURS_PAQUETS:
             paquet = next((a for a in args if not a.startswith("-")), "")
             if paquet and not _paquet_epingle(paquet):
-                constats.append(constat("config_paquet_non_epingle", "eleve", "MCP04", "Paquet non épinglé (version flottante)",
-                                        f"« {commande} » installe la dernière version publiée de {paquet} à chaque lancement : "
-                                        "une mise à jour malveillante serait exécutée sans audit (rug pull).", ligne_cmd, nom, ligne))
+                constats.append(constat("config_paquet_non_epingle", "eleve", "MCP04",
+                                        "Paquet non épinglé (version flottante)",
+                                        f"« {commande} » installe la dernière version publiée de {paquet} "
+                                        "à chaque lancement : "
+                                        "une mise à jour malveillante serait exécutée sans audit (rug pull).",
+                                        ligne_cmd, nom, ligne))
         if OPTIONS_DANGEREUSES.search(ligne_cmd):
             constats.append(constat("config_protections_desactivees", "critique", "MCP02", "Protections désactivées",
-                                    "Une option de la commande désactive les confirmations ou le bac à sable.", ligne_cmd, nom, ligne))
+                                    "Une option de la commande désactive les confirmations ou le bac à sable.",
+                                    ligne_cmd, nom, ligne))
         if any(a.strip() and a.strip().lower().rstrip("/\\") in RACINES_LARGES for a in args):
             constats.append(constat("config_acces_disque", "eleve", "MCP02", "Accès à tout le disque",
-                                    "Le serveur reçoit la racine du disque ou le dossier personnel : il peut lire et modifier "
+                                    "Le serveur reçoit la racine du disque ou le dossier personnel : "
+                                    "il peut lire et modifier "
                                     "bien plus que nécessaire (moindre privilège).", ligne_cmd, nom, ligne))
         for cle, valeur in s["_env_brut"].items():
             valeur = str(valeur)
             deja_detecte = any(re.search(m, valeur) for _, m in MOTIFS_SECRETS)  # déjà signalé par detecter_secrets
-            if CLE_SECRETE.search(cle) and len(valeur) >= 8 and not VALEUR_FACTICE.fullmatch(valeur) and not deja_detecte:
-                constats.append(constat("config_secret_clair", "eleve", "MCP01", "Secret en clair dans la configuration",
-                                        "Le secret est écrit dans le fichier au lieu d'être lu depuis le gestionnaire de "
-                                        "secrets ou une variable d'environnement.", f"{cle} = {_masquer(valeur)}", nom, ligne))
+            factice = bool(VALEUR_FACTICE.fullmatch(valeur))
+            if CLE_SECRETE.search(cle) and len(valeur) >= 8 and not factice and not deja_detecte:
+                constats.append(constat("config_secret_clair", "eleve", "MCP01",
+                                        "Secret en clair dans la configuration",
+                                        "Le secret est écrit dans le fichier au lieu d'être lu "
+                                        "depuis le gestionnaire de "
+                                        "secrets ou une variable d'environnement.",
+                                        f"{cle} = {_masquer(valeur)}", nom, ligne))
         hote = re.match(r"http://([^/:]+)", s["url"])
         if hote and hote.group(1) not in ("localhost", "127.0.0.1", "::1"):
             constats.append(constat("config_http_clair", "eleve", "MCP07", "Serveur distant sans chiffrement (http://)",
-                                    "Les échanges (et les éventuels jetons) circulent en clair sur le réseau.", s["url"], nom, ligne))
+                                    "Les échanges (et les éventuels jetons) circulent en clair sur le réseau.",
+                                    s["url"], nom, ligne))
     return constats
 
 

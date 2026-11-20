@@ -33,6 +33,12 @@ serveur = MCPServer(
 )
 
 
+# Erreurs attendues d'une analyse : chemin refusé ou introuvable (OSError), fichier mal formé
+# (ValueError, SyntaxError), arbre syntaxique trop profond (RecursionError), donnée absente (KeyError).
+# Toute autre exception est renvoyée au modèle comme résultat d'erreur par le framework MCP.
+ERREURS_OUTIL = (OSError, ValueError, SyntaxError, RecursionError, KeyError)
+
+
 def _erreur(e: Exception) -> dict:
     return {"erreur": f"{type(e).__name__} : {e}"}
 
@@ -63,7 +69,7 @@ def scanner_descriptions(chemin: str) -> dict:
         tools = az.extraire_tools(p)
         return {"tools": [{k: t[k] for k in ("nom", "description", "parametres", "ligne")} for t in tools],
                 "constats": az.analyser_descriptions(tools)}
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -77,7 +83,7 @@ def detecter_secrets(chemin: str) -> dict:
     """
     try:
         return {"constats": az.analyser_secrets(az.chemin_sur(chemin))}
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -93,7 +99,7 @@ def analyser_code(chemin: str) -> dict:
     try:
         p = az.chemin_sur(chemin)
         return {"constats": az.analyser_code(p), "imports": az.lister_imports(p)}
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -109,7 +115,7 @@ def analyser_skill(chemin: str) -> dict:
         p = az.chemin_sur(chemin)
         fichier = p / "SKILL.md" if p.is_dir() else p
         return {"constats": az.analyser_skill_texte(az.lire_texte(fichier))}
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -129,7 +135,7 @@ def analyser_config_mcp(chemin: str) -> dict:
             return {"info": "Aucun fichier de configuration MCP (clé mcpServers) trouvé. Pour la description JSON "
                             "d'un serveur distant (format tools/list), utilisez scanner_descriptions."}
         return {"serveurs": serveurs, "constats": az.analyser_config_mcp(p)}
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -145,7 +151,7 @@ def audit_complet(chemin: str) -> dict:
         resultat = az.audit_complet(az.chemin_sur(chemin))
         registry.journaliser("audit_tool", {"chemin": chemin, "score": resultat["score"]})
         return resultat
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -161,7 +167,7 @@ def calculer_empreinte(chemin: str) -> dict:
     """
     try:
         return az.empreinte(az.chemin_sur(chemin))
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -184,7 +190,7 @@ def approuver_serveur(nom: str, chemin: str) -> dict:
         registry.approuver(nom, installe.relative_to(az.ROOT).as_posix(), e)
         return {"approuve": True, "nom": nom, "installe_dans": installe.relative_to(az.ROOT).as_posix(),
                 "empreinte_tools": e["empreinte_tools"]}
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -212,7 +218,7 @@ def verifier_rug_pull(nom: str, chemin: str = "") -> dict:
                                     f"{approuve['date_approbation']} :\n{az.resume_modification(diff)}")
             diff["action"] = "Approbation suspendue et alerte enregistrée."
         return diff
-    except Exception as e:
+    except ERREURS_OUTIL as e:
         return _erreur(e)
 
 
@@ -313,7 +319,7 @@ def verifier_vulnerabilites_osv(paquet: str, version: str = "", ecosysteme: str 
         return {"paquet": paquet, "version": version or "toutes", "nombre": len(vulns),
                 "vulnerabilites": [{"id": v.get("id"), "alias": v.get("aliases", [])[:3],
                                     "resume": (v.get("summary") or "")[:200]} for v in vulns[:10]]}
-    except Exception as e:
+    except (OSError, ValueError) as e:  # réseau, HTTP, JSON
         return {"erreur": f"OSV.dev injoignable : {e}"}
 
 

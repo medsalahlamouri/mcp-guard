@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP-Guard — Audit de sécurité des serveurs MCP</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+  :root { --bg:#f6f7f9; --carte:#fff; --bord:#dfe3e8; --texte:#1c2330; --doux:#5b6675; --accent:#1f5fbf;
+          --crit:#b42318; --crit-bg:#fdecea; --eleve:#b54708; --eleve-bg:#fef3e2; --moyen:#8a6d00; --moyen-bg:#fdf8e1;
+          --ok:#067647; --ok-bg:#e8f6ee; --rayon:10px; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Segoe UI",system-ui,sans-serif; background:var(--bg); color:var(--texte); font-size:15px; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:12px 24px; background:var(--carte); border-bottom:1px solid var(--bord); }
+  header h1 { font-size:18px; margin:0; display:flex; gap:8px; align-items:center; }
+  nav button { background:none; border:none; padding:8px 12px; cursor:pointer; color:var(--doux); font-size:14px; border-radius:6px; }
+  nav button.actif { color:var(--accent); background:#eaf1fc; }
+  main { max-width:1280px; margin:20px auto; padding:0 20px; }
+  .grille { display:grid; grid-template-columns:340px 1fr; gap:20px; align-items:start; }
+  .carte { background:var(--carte); border:1px solid var(--bord); border-radius:var(--rayon); padding:16px 18px; margin-bottom:16px; }
+  .carte h2 { font-size:15px; margin:0 0 12px; }
+  label { font-size:13px; color:var(--doux); display:block; margin:10px 0 4px; }
+  input, select, textarea { width:100%; padding:8px 10px; border:1px solid var(--bord); border-radius:6px; font:inherit; }
+  button.btn { padding:8px 14px; border:1px solid var(--bord); background:var(--carte); border-radius:6px; cursor:pointer; font:inherit; font-size:14px; }
+  button.btn:hover { background:#f0f2f5; }
+  button.principal { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.principal:hover { background:#174a96; }
+  button:disabled { opacity:.6; cursor:wait; }
+  .metriques { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+  .metrique { background:#f1f3f6; border-radius:8px; padding:10px 12px; }
+  .metrique .lib { font-size:12px; color:var(--doux); }
+  .metrique .val { font-size:22px; font-weight:600; }
+  .REJETER { color:var(--crit); } .CORRIGER { color:var(--eleve); } .INSTALLER { color:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--bord); vertical-align:top; }
+  th { color:var(--doux); font-weight:500; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:12px; font-weight:600; }
+  .critique { background:var(--crit-bg); color:var(--crit); } .eleve { background:var(--eleve-bg); color:var(--eleve); }
+  .moyen { background:var(--moyen-bg); color:var(--moyen); } .faible, .info { background:#eef0f3; color:var(--doux); }
+  .ok { background:var(--ok-bg); color:var(--ok); }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+  .rapport { line-height:1.6; font-size:14px; overflow-x:auto; }
+  .rapport table { margin:8px 0; } .rapport code { background:#f1f3f6; padding:1px 4px; border-radius:4px; }
+  .rapport pre { background:#f1f3f6; padding:10px; border-radius:6px; overflow-x:auto; }
+  .trace { font-size:12px; color:var(--doux); }
+  .trace span { display:inline-block; background:#eef0f3; border-radius:4px; padding:2px 6px; margin:2px; font-family:Consolas,monospace; }
+  .chat { max-height:420px; overflow-y:auto; margin-bottom:10px; }
+  .msg { padding:10px 12px; border-radius:8px; margin-bottom:8px; font-size:14px; }
+  .msg.u { background:#eaf1fc; } .msg.a { background:#f6f7f9; border:1px solid var(--bord); }
+  .ligne { display:flex; gap:8px; }
+  .liste-elements { max-height:260px; overflow-y:auto; border:1px solid var(--bord); border-radius:6px; }
+  .element { padding:7px 10px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--bord); display:flex; justify-content:space-between; }
+  .element:hover { background:#f6f7f9; } .element.sel { background:#eaf1fc; }
+  .zone { font-size:11px; color:var(--doux); }
+  .attente { color:var(--doux); font-size:14px; padding:20px 0; }
+  .erreur { color:var(--crit); font-size:13px; margin-top:6px; }
+  .cache { display:none; }
+  #connexion { max-width:380px; margin:12vh auto; }
+  .note { font-size:12px; color:var(--doux); }
+</style>
+</head>
+<body>
+
+<section id="connexion" class="carte cache">
+  <h2>MCP-Guard — Connexion</h2>
+  <p class="note">Interface locale protégée. Mot de passe défini dans le fichier <code>.env</code>.</p>
+  <label for="mdp">Mot de passe</label>
+  <input id="mdp" type="password" autocomplete="current-password">
+  <div class="actions"><button class="btn principal" onclick="seConnecter()">Se connecter</button></div>
+  <div id="erreur-connexion" class="erreur"></div>
+</section>
+
+<div id="app" class="cache">
+<header>
+  <h1>🛡️ MCP-Guard <span class="note" id="modele"></span></h1>
+  <nav>
+    <button data-vue="audit" class="actif">Audit</button>
+    <button data-vue="historique">Historique</button>
+    <button data-vue="approuves">Serveurs approuvés</button>
+    <button data-vue="planif">Planification et alertes</button>
+    <button onclick="seDeconnecter()">Déconnexion</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===================== VUE AUDIT ===================== -->
+  <div id="vue-audit" class="grille">
+    <div>
+      <div class="carte">
+        <h2>1. Élément à auditer</h2>
+        <div class="liste-elements" id="elements"></div>
+        <div class="actions"><button class="btn principal" id="btn-audit" onclick="lancerAudit()">Lancer l'audit</button></div>
+        <div id="selection" class="note">Aucun élément sélectionné.</div>
+      </div>
+      <div class="carte">
+        <h2>Déposer un serveur ou une skill</h2>
+        <label for="nom-depot">Nom</label><input id="nom-depot" placeholder="mon-serveur-mcp">
+        <label for="fichiers">Fichiers (.py, .json, SKILL.md…)</label><input id="fichiers" type="file" multiple>
+        <div class="actions"><button class="btn" onclick="deposer()">Déposer</button></div>
+        <label for="url-github">Ou importer depuis GitHub</label>
+        <div class="ligne"><input id="url-github" placeholder="https://github.com/org/depot"><button class="btn" onclick="importerGithub()">Importer</button></div>
+        <div id="info-depot" class="note"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="carte" id="resultat">
+        <h2>2. Résultat</h2>
+        <div class="attente">Sélectionnez un élément puis lancez l'audit. L'agent analyse le code sans jamais l'exécuter.</div>
+      </div>
+      <div class="carte">
+        <h2>3. Questions à l'agent</h2>
+        <div class="chat" id="chat"></div>
+        <div class="ligne">
+          <input id="message" placeholder="Ex. Explique comment l'instruction cachée exfiltre la clé SSH" onkeydown="if(event.key==='Enter')envoyerMessage()">
+          <button class="btn principal" id="btn-message" onclick="envoyerMessage()">Envoyer</button>
+        </div>
+        <div class="actions"><button class="btn" onclick="nouvelleConversation()">Nouvelle conversation</button></div>
+        <div class="note" id="info-session"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== VUE HISTORIQUE ===================== -->
+  <div id="vue-historique" class="cache">
+    <div class="carte"><h2>Historique des audits</h2><div id="historique"></div></div>
+  </div>
+
+  <!-- ===================== VUE APPROUVÉS ===================== -->
+  <div id="vue-approuves" class="cache">
+    <div class="carte">
+      <h2>Serveurs approuvés (mémoire à long terme)</h2>
+      <p class="note">À l'approbation, MCP-Guard installe une copie du serveur et mémorise l'empreinte SHA-256 de ses tools.</p>
+      <div id="approuves"></div>
+    </div>
+  </div>
+
+  <!-- ===================== VUE PLANIFICATION ===================== -->
+  <div id="vue-planif" class="cache">
+    <div class="carte">
+      <h2>Tâche planifiée : réaudit des serveurs approuvés</h2>
+      <p class="note">Vérifie automatiquement que les serveurs approuvés n'ont pas changé (détection du rug pull). S'exécute sans LLM, donc sans consommer de quota.</p>
+      <div id="planif"></div>
+      <div class="actions"><button class="btn principal" onclick="executerReaudit()">Exécuter maintenant</button></div>
+      <div id="bilan" class="note"></div>
+    </div>
+    <div class="carte"><h2>Alertes</h2><div id="alertes"></div></div>
+  </div>
+</main>
+</div>
+
+<script>
+let elementSelectionne = null, sessionId = null, dernierAudit = null;
+const $ = (id) => document.getElementById(id);
+const echap = (t) => String(t ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const libelleGravite = {critique:"Critique", eleve:"Élevée", moyen:"Moyenne", faible:"Faible", info:"Info"};
+
+function markdownSur(texte) {
+  // Le rapport peut citer du contenu malveillant issu des fichiers audités : on assainit le HTML (anti-XSS).
+  if (window.marked && window.DOMPurify) return DOMPurify.sanitize(marked.parse(texte || ""));
+  return "<pre>" + echap(texte) + "</pre>";
+}
+
+async function api(url, options = {}) {
+  const r = await fetch(url, options);
+  if (r.status === 401) { afficherConnexion(); throw new Error("Session expirée"); }
+  const type = r.headers.get("content-type") || "";
+  const donnees = type.includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(donnees.detail || donnees || "Erreur");
+  return donnees;
+}
+const post = (url, corps) => api(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(corps || {})});
+
+/* ---------- Connexion ---------- */
+function afficherConnexion() { $("app").classList.add("cache"); $("connexion").classList.remove("cache"); }
+async function seConnecter() {
+  $("erreur-connexion").textContent = "";
+  try { await post("/api/connexion", {mot_de_passe: $("mdp").value}); demarrer(); }
+  catch (e) { $("erreur-connexion").textContent = e.message; }
+}
+$("mdp").addEventListener("keydown", e => { if (e.key === "Enter") seConnecter(); });
+async function seDeconnecter() { await post("/api/deconnexion"); afficherConnexion(); }
+
+async function demarrer() {
+  try { const s = await api("/api/session"); $("modele").textContent = "modèle : " + s.modele; }
+  catch { return; }
+  $("connexion").classList.add("cache"); $("app").classList.remove("cache");
+  chargerElements();
+}
+
+/* ---------- Navigation ---------- */
+document.querySelectorAll("nav button[data-vue]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button[data-vue]").forEach(x => x.classList.toggle("actif", x === b));
+  ["audit","historique","approuves","planif"].forEach(v => $("vue-" + v).classList.toggle("cache", v !== b.dataset.vue));
+  if (b.dataset.vue === "historique") chargerHistorique();
+  if (b.dataset.vue === "approuves") chargerApprouves();
+  if (b.dataset.vue === "planif") chargerPlanif();
+});
+
+/* ---------- Éléments ---------- */
+async function chargerElements() {
+  const liste = await api("/api/elements");
+  $("elements").innerHTML = liste.map(e =>
+    `<div class="element" data-chemin="${echap(e.chemin)}"><span>${echap(e.nom)}</span><span class="zone">${echap(e.zone)}</span></div>`).join("");
+  document.querySelectorAll(".element").forEach(el => el.onclick = () => {
+    document.querySelectorAll(".element").forEach(x => x.classList.remove("sel"));
+    el.classList.add("sel"); elementSelectionne = el.dataset.chemin;
+    $("selection").textContent = "Sélection : " + elementSelectionne;
+  });
+}
+async function deposer() {
+  const fd = new FormData(); fd.append("nom", $("nom-depot").value || "depot");
+  for (const f of $("fichiers").files) fd.append("fichiers", f);
+  try { const r = await api("/api/depot", {method:"POST", body:fd}); $("info-depot").textContent = "Déposé dans " + r.chemin; chargerElements(); }
+  catch (e) { $("info-depot").textContent = e.message; }
+}
+async function importerGithub() {
+  $("info-depot").textContent = "Import en cours…";
+  try { const r = await post("/api/import-github", {url: $("url-github").value}); $("info-depot").textContent = `${r.fichiers.length} fichier(s) importé(s) dans ${r.chemin}`; chargerElements(); }
+  catch (e) { $("info-depot").textContent = e.message; }
+}
+
+/* ---------- Audit ---------- */
+async function lancerAudit() {
+  if (!elementSelectionne) { $("selection").textContent = "Choisissez d'abord un élément dans la liste."; return; }
+  $("btn-audit").disabled = true;
+  $("resultat").innerHTML = `<h2>2. Résultat</h2><div class="attente">Audit de <b>${echap(elementSelectionne)}</b> en cours… l'agent appelle ses tools MCP et rédige le rapport (environ 1 minute).</div>`;
+  try {
+    const r = await post("/api/audit", {chemin: elementSelectionne});
+    dernierAudit = r; sessionId = r.session_id; afficherResultat(r);
+    $("info-session").textContent = "Conversation liée à l'audit n° " + r.audit_id + " (mémoire à court terme).";
+  } catch (e) { $("resultat").innerHTML = `<h2>2. Résultat</h2><div class="erreur">${echap(e.message)}</div>`; }
+  $("btn-audit").disabled = false;
+}
+
+function afficherResultat(r) {
+  const d = r.donnees;
+  const lignes = d.constats.map((c, i) => `<tr><td>${i + 1}</td><td><span class="badge ${c.gravite}">${libelleGravite[c.gravite]}</span></td>
+    <td>${echap(c.owasp)}</td><td>${echap(c.tool || "-")}</td><td><b>${echap(c.titre)}</b><br><span class="note">${echap(c.explication)}</span></td>
+    <td><code>${echap(c.preuve)}</code></td></tr>`).join("") || `<tr><td colspan="6">Aucun constat.</td></tr>`;
+  const outils = (r.outils_utilises || []).map(o => `<span>${echap(o.outil)}</span>`).join("");
+  const cout = r.cout_equivalent_usd != null ? ` · coût équivalent API : ${r.cout_equivalent_usd.toFixed(3)} $ (non facturé, pris sur l'abonnement)` : "";
+  $("resultat").innerHTML = `<h2>2. Résultat — ${echap(d.cible)}</h2>
+    <div class="metriques">
+      <div class="metrique"><div class="lib">Score de risque</div><div class="val ${d.verdict}">${d.score}/100</div></div>
+      <div class="metrique"><div class="lib">Niveau</div><div class="val">${echap(d.niveau)}</div></div>
+      <div class="metrique"><div class="lib">Constats</div><div class="val">${d.constats.length}</div></div>
+      <div class="metrique"><div class="lib">Verdict</div><div class="val ${d.verdict}">${d.verdict}</div></div>
+    </div>
+    <table><thead><tr><th>#</th><th>Gravité</th><th>OWASP</th><th>Tool</th><th>Constat</th><th>Preuve</th></tr></thead><tbody>${lignes}</tbody></table>
+    <div class="actions">
+      <a class="btn" href="/api/audits/${r.audit_id}/rapport.md"><button class="btn">Télécharger le rapport</button></a>
+      <button class="btn" onclick="envoyerAlerte(${r.audit_id})">Envoyer l'alerte e-mail</button>
+      ${d.verdict === "INSTALLER" ? `<button class="btn principal" onclick="approuver()">Approuver et installer</button>` : ""}
+    </div>
+    <div class="note" id="info-action"></div>
+    <div class="trace">Tools appelés par l'agent : ${outils || "aucun"} · ${r.tours ?? "?"} tour(s)${cout}</div>
+    <hr style="border:none;border-top:1px solid var(--bord);margin:14px 0">
+    <div class="rapport">${r.erreur ? `<div class="erreur">${echap(r.reponse)}</div>` : markdownSur(r.reponse)}</div>`;
+}
+
+async function envoyerAlerte(id) {
+  try { const r = await post("/api/alerte/" + id); $("info-action").textContent = r.envoye ? "Alerte envoyée à " + r.destinataire : "Mode démonstration : e-mail enregistré dans " + r.fichier; }
+  catch (e) { $("info-action").textContent = e.message; }
+}
+async function approuver() {
+  const nom = prompt("Nom du serveur approuvé :", "meteo-tunisie"); if (!nom) return;
+  try { const r = await post("/api/approuver", {chemin: elementSelectionne, nom}); $("info-action").textContent = `Approuvé et installé dans ${r.installe_dans}. Empreinte mémorisée.`; chargerElements(); }
+  catch (e) { $("info-action").textContent = e.message; }
+}
+
+/* ---------- Dialogue ---------- */
+function ajouterMessage(role, html) { const d = document.createElement("div"); d.className = "msg " + role; d.innerHTML = html; $("chat").appendChild(d); $("chat").scrollTop = $("chat").scrollHeight; }
+async function envoyerMessage() {
+  const texte = $("message").value.trim(); if (!texte) return;
+  $("message").value = ""; ajouterMessage("u", echap(texte)); $("btn-message").disabled = true;
+  try {
+    const r = await post("/api/dialogue", {message: texte, session_id: sessionId});
+    sessionId = r.session_id || sessionId;
+    const outils = (r.outils_utilises || []).map(o => `<span>${echap(o.outil)}</span>`).join("");
+    ajouterMessage("a", markdownSur(r.reponse) + (outils ? `<div class="trace">Tools : ${outils}</div>` : ""));
+  } catch (e) { ajouterMessage("a", `<span class="erreur">${echap(e.message)}</span>`); }
+  $("btn-message").disabled = false;
+}
+function nouvelleConversation() { sessionId = null; $("chat").innerHTML = ""; $("info-session").textContent = "Nouvelle conversation : l'agent repart sans contexte (seule la mémoire à long terme subsiste)."; }
+
+/* ---------- Historique, approuvés, planification ---------- */
+async function chargerHistorique() {
+  const l = await api("/api/audits");
+  $("historique").innerHTML = l.length ? `<table><tr><th>N°</th><th>Date</th><th>Cible</th><th>Type</th><th>Score</th><th>Verdict</th><th></th></tr>` +
+    l.map(a => `<tr><td>${a.id}</td><td>${echap(a.date)}</td><td>${echap(a.cible)}</td><td>${echap(a.type)}</td><td>${a.score}</td>
+    <td class="${a.verdict}"><b>${a.verdict}</b></td><td><a href="/api/audits/${a.id}/rapport.md">Rapport</a></td></tr>`).join("") + "</table>" : "Aucun audit.";
+}
+async function chargerApprouves() {
+  const l = await api("/api/approuves");
+  $("approuves").innerHTML = l.length ? `<table><tr><th>Nom</th><th>Copie installée</th><th>Approuvé le</th><th>Statut</th><th>Dernière vérification</th><th>Démonstration</th></tr>` +
+    l.map(s => `<tr><td><b>${echap(s.nom)}</b></td><td><code>${echap(s.chemin)}</code></td><td>${echap(s.date_approbation)}</td>
+    <td><span class="badge ${s.statut === "approuvé" ? "ok" : "critique"}">${echap(s.statut)}</span></td><td>${echap(s.derniere_verification)}</td>
+    <td><button class="btn" onclick="simulerMiseAJour('${echap(s.nom)}')">Simuler une mise à jour malveillante</button></td></tr>`).join("") + "</table>" : "Aucun serveur approuvé.";
+}
+async function simulerMiseAJour(nom) {
+  if (!confirm("Remplacer silencieusement le serveur installé par une version modifiée (scénario rug pull) ?")) return;
+  const r = await post("/api/demo/mise-a-jour-malveillante", {nom}); alert(r.info);
+}
+async function chargerPlanif() {
+  const p = await api("/api/planification");
+  $("planif").innerHTML = `<p>Déclencheur : <code>${echap(p.declencheur)}</code><br>Prochaine exécution : <b>${echap(p.prochaine_execution)}</b></p>`;
+  const a = await api("/api/alertes");
+  $("alertes").innerHTML = a.length ? `<table><tr><th>Date</th><th>Cible</th><th>Type</th><th>Message</th></tr>` +
+    a.map(x => `<tr><td>${echap(x.date)}</td><td>${echap(x.cible)}</td><td><span class="badge critique">${echap(x.type)}</span></td><td style="white-space:pre-wrap">${echap(x.message)}</td></tr>`).join("") + "</table>" : "Aucune alerte.";
+}
+async function executerReaudit() {
+  const r = await post("/api/planification/executer");
+  $("bilan").textContent = `${r.verifies} serveur(s) vérifié(s) — ${r.rug_pulls.length} rug pull(s) détecté(s).`;
+  chargerPlanif();
+}
+
+demarrer();
+</script>
+</body>
+</html>

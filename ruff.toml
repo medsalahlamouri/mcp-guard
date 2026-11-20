@@ -1,0 +1,15 @@
+# Configuration de ruff (analyse statique et style) : python -m ruff check .
+line-length = 120
+target-version = "py311"
+# samples/ contient du code VOLONTAIREMENT vulnérable (échantillons de démonstration) : jamais corrigé.
+extend-exclude = ["samples", "uploads", "data"]
+
+[lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "BLE", "I"]
+ignore = [
+    "B008",  # FastAPI : File(...) et Form(...) en valeur par défaut sont l'usage documenté
+]
+
+[lint.isort]
+known-first-party = ["backend", "mcp_server"]
+known-third-party = ["aide_tests"]

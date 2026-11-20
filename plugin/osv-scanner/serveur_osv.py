@@ -59,7 +59,9 @@ def extraire_dependances(cible: Path) -> list[dict]:
             if re.search(r"requirements[\w.-]*\.txt$", nom):
                 for ligne in az.lire_texte(f).splitlines():
                     ligne = ligne.split("#")[0].strip()
-                    if ligne and not ligne.startswith(("-", "git+", "http")) and (m := SPEC_PYTHON.match(ligne)):
+                    if ligne.startswith(("-", "git+", "http://", "https://")):  # option, dépôt Git ou URL
+                        continue
+                    if ligne and (m := SPEC_PYTHON.match(ligne)):
                         _ajouter(deps, m.group(1), m.group(4), "PyPI", f.name)
             elif nom.endswith("pyproject.toml"):
                 projet = tomllib.loads(az.lire_texte(f))
@@ -103,7 +105,7 @@ def interroger_osv(deps: list[dict]) -> list[dict]:
     resultats = _osv("querybatch", {"queries": requetes}).get("results", [])
     details_restants = MAX_DETAILS
     sortie = []
-    for dep, res in zip(deps, resultats):
+    for dep, res in zip(deps, resultats, strict=False):  # OSV renvoie une réponse par requête
         ids = [v["id"] for v in res.get("vulns", [])]
         exemples = []
         for id_ in ids[:3]:
@@ -112,10 +114,12 @@ def interroger_osv(deps: list[dict]) -> list[dict]:
             details_restants -= 1
             try:
                 v = _osv(f"vulns/{id_}")
-                exemples.append({"id": id_, "alias": v.get("aliases", [])[:2], "resume": (v.get("summary") or "")[:160]})
-            except Exception:
+                exemples.append({"id": id_, "alias": v.get("aliases", [])[:2],
+                                 "resume": (v.get("summary") or "")[:160]})
+            except (OSError, ValueError):  # réseau, HTTP ou JSON : la fiche détaillée est facultative
                 exemples.append({"id": id_})
-        sortie.append({**dep, "version": dep["version"] or "non fixée", "vulnerabilites": len(ids), "exemples": exemples})
+        sortie.append({**dep, "version": dep["version"] or "non fixée", "vulnerabilites": len(ids),
+                       "exemples": exemples})
     return sortie
 
 
@@ -130,14 +134,14 @@ def analyser_dependances(chemin: str) -> dict:
     """
     try:
         cible = az.chemin_sur(chemin)
-    except Exception as e:
+    except (OSError, ValueError) as e:  # hors de samples/ et uploads/, introuvable, chemin invalide
         return {"erreur": f"{type(e).__name__} : {e}"}
     deps = extraire_dependances(cible)
     if not deps:
         return {"chemin": chemin, "nombre_dependances": 0, "info": "Aucune dépendance tierce détectée."}
     try:
         resultats = interroger_osv(deps)
-    except Exception as e:
+    except (OSError, ValueError, KeyError) as e:  # réseau, HTTP, réponse JSON inattendue
         return {"chemin": chemin, "erreur": f"OSV.dev injoignable : {e}", "dependances": deps}
     vulnerables = [r for r in resultats if r["vulnerabilites"]]
     return {

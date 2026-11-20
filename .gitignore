@@ -1,35 +1,40 @@
-# Secrets and local configuration
+# --- Secrets : ne jamais partager ni archiver ---
 .env
 .env.*
 !.env.example
+# Google Drive (OAuth2) : identifiants client et jeton d'accès
 credentials.json
-client_secret*.json
+credentials*.json
 token.json
-*token*.json
-secrets/
+# Fichiers d'identifiants courants
 *.pem
 *.key
 
-# Python
-.venv/
-venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Runtime data (never commit user data, reports, or databases)
+# --- Données locales générées par l'application ---
 data/*.db
-data/*.sqlite*
+data/*.db-journal
 data/outbox/
 uploads/*
 !uploads/.gitkeep
 
-# Local editor / OS files
-.claude/settings.local.json
+# --- Python, outils de test et d'analyse ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Éditeurs et système ---
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-*.log
+
+# --- Réglages locaux de Claude Code et ancienne version de l'interface (non livrées) ---
+.claude/settings.local.json
+frontend/index.ancien.html

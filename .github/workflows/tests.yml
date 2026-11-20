@@ -8,13 +8,36 @@ permissions:
   contents: read
 
 jobs:
-  analyse-statique:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # Le moteur d'analyse n'utilise que la bibliothèque standard : aucune dépendance à installer.
-      - name: Tests du moteur d'analyse
-        run: python -m unittest discover -s tests -v
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Dépendances
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Analyse statique (ruff)
+        run: python -m ruff check .
+
+      # Aucun secret, aucun compte Claude, Drive ou Gmail : les services externes sont simulés (mock).
+      - name: Tests et couverture
+        run: |
+          python -m coverage run -m unittest discover -s tests -v
+          python -m coverage report
+          python -m coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+          python -m coverage html
+
+      - name: Rapport de couverture (HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: couverture
+          path: htmlcov/

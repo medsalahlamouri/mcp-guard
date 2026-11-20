@@ -35,7 +35,7 @@ afficher à l'utilisateur la description complète des tools.
 ## MCP04:2025 — Software Supply Chain Attacks & Dependency Tampering
 **Risque** : paquet ou serveur compromis, typosquatting, mise à jour malveillante après
 approbation (« rug pull »).
-**Indicateurs** : empreinte des définitions de tools modifiée depuis l'approbation, dépendance
+**Indicateurs** : empreinte des définitions de tools ou du code modifiée depuis l'approbation, dépendance
 inconnue ou récente, script d'installation `curl … | bash`.
 **Remédiation** : épingler les versions et les empreintes, réauditer chaque mise à jour,
 vérifier les vulnérabilités connues (OSV, CVE).

@@ -22,13 +22,16 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 from backend import agent, connecteurs
 from mcp_server import analyzers as az
 from mcp_server import registry
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 SERVEUR_MCP = ROOT / "mcp_server" / "server.py"
 ECHANTILLON = "samples/01_serveur_sain"
 
@@ -36,7 +39,8 @@ DEFINITIONS = [
     {"id": "instructions", "numero": 1, "nom": "Instructions (System Prompt)",
      "definition": "Règles de comportement claires et contraintes de l'agent.",
      "justification": "Fixe le rôle d'auditeur, les règles numérotées et les contraintes de sécurité : jamais "
-                      "d'exécution du code audité, une preuve pour chaque constat, périmètre limité à samples/ et uploads/."},
+                      "d'exécution du code audité, une preuve pour chaque constat, "
+                      "périmètre limité à samples/ et uploads/."},
     {"id": "skills", "numero": 2, "nom": "Skills (Compétences)",
      "definition": "Capacités spécifiques définies (ex : savoir analyser un fichier JSON).",
      "justification": "Trois savoir-faire packagés : la méthode et le format du rapport d'audit, l'analyse d'un "
@@ -51,7 +55,8 @@ DEFINITIONS = [
      "justification": "GitHub (import d'un dépôt à auditer), Google Drive (archivage de chaque rapport) et Gmail "
                       "(notification après chaque audit), déclenchés par le backend de façon déterministe."},
     {"id": "plugins", "numero": 5, "nom": "Plugins",
-     "definition": "Extensions préconçues ajoutant des capacités (ex : plugin de recherche web, plugin d'analyse de données).",
+     "definition": "Extensions préconçues ajoutant des capacités "
+                   "(ex : plugin de recherche web, plugin d'analyse de données).",
      "justification": "Deux plugins Claude Code : « mcp-guard » (skills d'audit) et « osv-scanner », qui ajoute son "
                       "propre serveur MCP pour vérifier les dépendances auprès de la base de vulnérabilités OSV.dev."},
     {"id": "mcp", "numero": 6, "nom": "MCP (Model Context Protocol)",
@@ -70,7 +75,8 @@ DEFINITIONS = [
      "justification": "Court terme : reprise de la conversation liée à un audit. Long terme : SQLite (audits, "
                       "serveurs approuvés et empreintes, alertes, journal, préférences), consultable par l'agent."},
     {"id": "authentification", "numero": 9, "nom": "Authentification",
-     "definition": "Mécanisme sécurisé pour que l'agent accède aux ressources (OAuth2, Clés API, ou Microsoft Entra ID).",
+     "definition": "Mécanisme sécurisé pour que l'agent accède aux ressources "
+                   "(OAuth2, Clés API, ou Microsoft Entra ID).",
      "justification": "OAuth du compte Claude, OAuth2 Google Drive, mot de passe d'application Gmail, jeton GitHub et "
                       "mot de passe de l'interface. Tous les secrets sont hors du code et jamais affichés."},
     {"id": "bonus", "numero": 0, "nom": "Bonus : tâche planifiée",
@@ -86,13 +92,13 @@ _verrou_sdk = threading.Lock()
 _cache_sdk: dict = {"t": 0.0, "donnees": None}
 
 
-def configurer(planificateur, reaudit) -> None:
+def configurer(planificateur: Any, reaudit: Callable[[], dict]) -> None:
     """Le backend fournit son planificateur et sa fonction de ré-audit (carte Bonus)."""
     global _planificateur, _reaudit
     _planificateur, _reaudit = planificateur, reaudit
 
 
-def _boucle(coroutine):
+def _boucle(coroutine: Coroutine[Any, Any, Any]) -> Any:
     boucle = asyncio.ProactorEventLoop() if sys.platform == "win32" else asyncio.new_event_loop()
     try:
         return boucle.run_until_complete(coroutine)
@@ -158,29 +164,28 @@ def client_mcp(appels: list[tuple[str, dict]]) -> dict:
 
     async def _client() -> dict:
         params = StdioServerParameters(command=sys.executable, args=[str(SERVEUR_MCP)], cwd=str(ROOT))
-        async with stdio_client(params) as (lecture, ecriture):
-            async with ClientSession(lecture, ecriture) as session:
-                await session.initialize()
-                tools = (await session.list_tools()).tools
-                resultats = {}
-                for nom, args in appels:
-                    r = await session.call_tool(nom, args)
-                    texte = "".join(c.text for c in r.content if hasattr(c, "text"))
-                    resultats[nom] = {"erreur": r.is_error, "donnees": r.structured_content or _json(texte)}
-                return {"tools": [{"nom": t.name, "description": (t.description or "").strip().splitlines()[0]}
-                                  for t in tools], "appels": resultats}
+        async with stdio_client(params) as (lecture, ecriture), ClientSession(lecture, ecriture) as session:
+            await session.initialize()
+            tools = (await session.list_tools()).tools
+            resultats = {}
+            for nom, args in appels:
+                r = await session.call_tool(nom, args)
+                texte = "".join(c.text for c in r.content if hasattr(c, "text"))
+                resultats[nom] = {"erreur": r.is_error, "donnees": r.structured_content or _json(texte)}
+            return {"tools": [{"nom": t.name, "description": (t.description or "").strip().splitlines()[0]}
+                              for t in tools], "appels": resultats}
 
     return _boucle(_client())
 
 
-def _json(texte: str):
+def _json(texte: str) -> Any:
     try:
         return json.loads(texte)
     except ValueError:
         return texte
 
 
-def _module_osv():
+def _module_osv() -> ModuleType:
     spec = importlib.util.spec_from_file_location("serveur_osv", ROOT / "plugin" / "osv-scanner" / "serveur_osv.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -213,7 +218,8 @@ def _plugins() -> list[dict]:
         mcp = racine / ".mcp.json"
         resultat.append({"nom": info["name"], "version": info.get("version"), "description": info.get("description"),
                          "skills": sorted(p.parent.name for p in racine.glob("skills/*/SKILL.md")),
-                         "serveurs_mcp": sorted(json.loads(mcp.read_text(encoding="utf-8"))["mcpServers"]) if mcp.exists() else []})
+                         "serveurs_mcp": sorted(json.loads(mcp.read_text(encoding="utf-8"))["mcpServers"])
+                                         if mcp.exists() else []})
     return resultat
 
 
@@ -239,16 +245,21 @@ def _mecanismes_auth() -> list[dict]:
     defini = lambda k: "défini" if os.getenv(k) else "vide"  # noqa: E731
     jeton = connecteurs.chemin_token()
     return [
-        {"nom": "Compte Claude (OAuth via Claude Code)", "type": "OAuth", "stockage": "identifiants Claude Code (hors projet)",
+        {"nom": "Compte Claude (OAuth via Claude Code)", "type": "OAuth",
+         "stockage": "identifiants Claude Code (hors projet)",
          "etat": "vérifié au test"},
-        {"nom": "Google Drive (OAuth2, ID client « Application de bureau »)", "type": "OAuth2", "stockage": "credentials.json + token.json",
-         "etat": "défini" if connecteurs.drive_configure() else ("credentials.json seul" if connecteurs.chemin_credentials().exists() else "vide"),
+        {"nom": "Google Drive (OAuth2, ID client « Application de bureau »)", "type": "OAuth2",
+         "stockage": "credentials.json + token.json",
+         "etat": "défini" if connecteurs.drive_configure()
+          else ("credentials.json seul" if connecteurs.chemin_credentials().exists() else "vide"),
          "portee": "drive.file uniquement" if jeton.exists() else None},
-        {"nom": "Gmail (mot de passe d'application)", "type": "Secret applicatif", "stockage": ".env (SMTP_MOT_DE_PASSE)",
+        {"nom": "Gmail (mot de passe d'application)", "type": "Secret applicatif",
+         "stockage": ".env (SMTP_MOT_DE_PASSE)",
          "etat": defini("SMTP_MOT_DE_PASSE")},
         {"nom": "GitHub (jeton d'accès personnel)", "type": "Clé API", "stockage": ".env (GITHUB_TOKEN)",
          "etat": defini("GITHUB_TOKEN") if os.getenv("GITHUB_TOKEN") else "vide (mode anonyme, 60 requêtes/h)"},
-        {"nom": "Interface web (mot de passe + cookie de session)", "type": "Mot de passe", "stockage": ".env (MCPGUARD_MOT_DE_PASSE)",
+        {"nom": "Interface web (mot de passe + cookie de session)", "type": "Mot de passe",
+         "stockage": ".env (MCPGUARD_MOT_DE_PASSE)",
          "etat": defini("MCPGUARD_MOT_DE_PASSE")},
     ]
 
@@ -277,7 +288,8 @@ def donnees(id_: str) -> dict:
         return {"documents": _documents()}
     if id_ == "memoire":
         return {"tables": registry.compter_tables(), "preferences": {**registry.lire_preferences(),
-                "email_notification": "personnalisée" if registry.lire_preferences()["email_notification"] else "celle du .env"},
+                "email_notification": "personnalisée" if registry.lire_preferences()["email_notification"]
+                 else "celle du .env"},
                 "sessions": registry.lister_sessions(5)}
     if id_ == "authentification":
         return {"mecanismes": _mecanismes_auth()}
@@ -321,7 +333,8 @@ def tester_skills() -> dict:
     manquantes = [s for s in agent.SKILLS if s not in sdk["skills"]]
     if manquantes:
         return _ko(f"Skills non chargées par Claude Code : {manquantes}", chargees=sdk["skills"])
-    return _ok(f"{len(agent.SKILLS)} skills chargées par Claude Code {sdk['version_cli']} (initialize, sans appel au modèle)",
+    return _ok(f"{len(agent.SKILLS)} skills chargées par Claude Code {sdk['version_cli']} "
+               "(initialize, sans appel au modèle)",
                chargees=sdk["skills"])
 
 
@@ -406,7 +419,8 @@ def tester_authentification() -> dict:
 
     cli = SubprocessCLITransport(prompt="", options=agent.options_agent())._find_cli()
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
-    sortie = subprocess.run([cli, "auth", "status"], capture_output=True, text=True, timeout=60, env=env, encoding="utf-8")
+    sortie = subprocess.run([cli, "auth", "status"], capture_output=True, text=True, timeout=60, env=env,
+                            encoding="utf-8")
     try:
         statut = json.loads(sortie.stdout)
     except ValueError:
@@ -418,7 +432,7 @@ def tester_authentification() -> dict:
         interface_401 = False
     except urllib.error.HTTPError as e:
         interface_401 = e.code == 401
-    except Exception:
+    except OSError:  # interface non démarrée sur 127.0.0.1:8000 : vérification impossible
         interface_401 = None
     jeton = connecteurs.chemin_token()
     portee = json.loads(jeton.read_text(encoding="utf-8")).get("scopes") if jeton.exists() else None
@@ -455,7 +469,7 @@ def tester(id_: str) -> dict:
     debut = time.time()
     try:
         resultat = TESTS[id_]()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001  volontaire : une carte de démonstration affiche tout échec
         resultat = _ko(f"{type(e).__name__} : {str(e)[:300]}")
     resultat["duree_s"] = round(time.time() - debut, 1)
     registry.journaliser("test_fonctionnalite", {"id": id_, **resultat})
@@ -469,7 +483,7 @@ def etat() -> list[dict]:
         dernier = registry.dernier_evenement("test_fonctionnalite", f'"id": "{d["id"]}"')
         try:
             donnees_carte = donnees(d["id"])
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  volontaire : une carte en erreur ne masque pas les autres
             donnees_carte = {"erreur": f"{type(e).__name__} : {e}"}
         cartes.append({**d, "donnees": donnees_carte, "dernier_test": dernier})
     return cartes
